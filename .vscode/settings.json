@@ -1,5 +1,15 @@
 {
   "[yaml]": {
-    "editor.formatOnSave": false
+    "editor.formatOnSave": false,
+    "editor.defaultFormatter": null
+  },
+  "[dockercompose]": {
+    "editor.formatOnSave": false,
+    "editor.defaultFormatter": null
+  },
+  "yaml.format.enable": false,
+  "prettier.disableLanguages": ["yaml", "dockercompose"],
+  "files.associations": {
+    "docker-compose.yaml": "yaml"
   }
 }
