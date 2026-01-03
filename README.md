@@ -141,21 +141,22 @@ The setup includes optional backup services for PostgreSQL and Redis that can up
 
 ### Enabling Backups
 
-Backup services use Docker Compose profiles and are disabled by default. To enable them:
+Backups are controlled by the `BACKUP_ENABLED` environment variable. To enable them:
 
-```bash
-# Start all services including backups
-docker compose --profile backup up -d
+1. Set `BACKUP_ENABLED=true` in your environment variables
+2. Configure the S3 settings below
+3. Redeploy
 
-# Or with Coolify, add to your docker-compose command
-docker compose --profile backup up -d
-```
+When disabled (default), the backup containers will start but remain idle (no resources consumed beyond minimal memory).
 
 ### Required Environment Variables
 
 When backups are enabled, you must configure these S3 settings:
 
 ```env
+# Enable backups
+BACKUP_ENABLED=true
+
 # S3 Configuration (Required for backups)
 BACKUP_S3_ENDPOINT=https://s3.amazonaws.com      # S3-compatible endpoint URL
 BACKUP_S3_BUCKET=my-backups                       # Bucket name
@@ -204,6 +205,7 @@ Examples:
 You can use the included MinIO service as your backup destination:
 
 ```env
+BACKUP_ENABLED=true
 BACKUP_S3_ENDPOINT=http://minio:9000
 BACKUP_S3_BUCKET=backups
 BACKUP_S3_ACCESS_KEY_ID=admin
@@ -215,11 +217,11 @@ Note: You'll need to create the `backups` bucket in MinIO first.
 
 ### Manual Backup
 
-To trigger an immediate backup:
+To trigger an immediate backup (requires `BACKUP_ENABLED=true`):
 
 ```bash
 # PostgreSQL
-docker compose exec postgres-backup /bin/sh -c '/backup.sh'
+docker compose exec postgres-backup /backup.sh
 
 # Redis
 docker compose exec redis-backup /backup.sh

@@ -203,38 +203,43 @@ services:
       start_period: 5s
 
   # ============================================
-  # BACKUP SERVICES (Optional - use profile "backup")
-  # Start with: docker compose --profile backup up -d
+  # BACKUP SERVICES (Optional - set BACKUP_ENABLED=true to enable)
   # ============================================
   postgres-backup:
     image: itbm/postgresql-backup-s3:latest
-    profiles:
-      - backup
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      BACKUP_ENABLED: '${BACKUP_ENABLED:-false}'
       POSTGRES_HOST: postgres
       POSTGRES_DATABASE: '${POSTGRES_DB:-trigger}'
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: '${SERVICE_PASSWORD_POSTGRES}'
       # S3 Configuration
-      S3_ENDPOINT: '${BACKUP_S3_ENDPOINT}'
-      S3_BUCKET: '${BACKUP_S3_BUCKET}'
-      S3_ACCESS_KEY_ID: '${BACKUP_S3_ACCESS_KEY_ID}'
-      S3_SECRET_ACCESS_KEY: '${BACKUP_S3_SECRET_ACCESS_KEY}'
+      S3_ENDPOINT: '${BACKUP_S3_ENDPOINT:-}'
+      S3_BUCKET: '${BACKUP_S3_BUCKET:-}'
+      S3_ACCESS_KEY_ID: '${BACKUP_S3_ACCESS_KEY_ID:-}'
+      S3_SECRET_ACCESS_KEY: '${BACKUP_S3_SECRET_ACCESS_KEY:-}'
       S3_REGION: '${BACKUP_S3_REGION:-us-east-1}'
       S3_PREFIX: '${DOCKER_RUNNER_NETWORKS:-trigger-net}/postgres'
       # Schedule (default: daily at 2:00 AM)
       SCHEDULE: '${BACKUP_POSTGRES_SCHEDULE:-0 2 * * *}'
       # Retention (default: keep 60 days) - deletes backups older than this
       DELETE_OLDER_THAN: '${BACKUP_POSTGRES_KEEP_DAYS:-60} days ago'
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        if [ "$${BACKUP_ENABLED}" != "true" ]; then
+          echo "Backups disabled (BACKUP_ENABLED != true). Sleeping indefinitely..."
+          tail -f /dev/null
+        fi
+        exec /backup.sh
 
   redis-backup:
     image: alpine:3.19
-    profiles:
-      - backup
     restart: unless-stopped
     depends_on:
       redis:
@@ -243,13 +248,14 @@ services:
       - 'redis-data:/data:ro'
       - './scripts/redis-backup.sh:/backup.sh:ro'
     environment:
+      BACKUP_ENABLED: '${BACKUP_ENABLED:-false}'
       REDIS_HOST: redis
       REDIS_PORT: 6379
       # S3 Configuration
-      S3_ENDPOINT: '${BACKUP_S3_ENDPOINT}'
-      S3_BUCKET: '${BACKUP_S3_BUCKET}'
-      S3_ACCESS_KEY_ID: '${BACKUP_S3_ACCESS_KEY_ID}'
-      S3_SECRET_ACCESS_KEY: '${BACKUP_S3_SECRET_ACCESS_KEY}'
+      S3_ENDPOINT: '${BACKUP_S3_ENDPOINT:-}'
+      S3_BUCKET: '${BACKUP_S3_BUCKET:-}'
+      S3_ACCESS_KEY_ID: '${BACKUP_S3_ACCESS_KEY_ID:-}'
+      S3_SECRET_ACCESS_KEY: '${BACKUP_S3_SECRET_ACCESS_KEY:-}'
       S3_REGION: '${BACKUP_S3_REGION:-us-east-1}'
       S3_PREFIX: '${DOCKER_RUNNER_NETWORKS:-trigger-net}/redis'
       # Schedule (default: daily at 3:00 AM)
@@ -260,6 +266,10 @@ services:
     command:
       - -c
       - |
+        if [ "$${BACKUP_ENABLED}" != "true" ]; then
+          echo "Backups disabled (BACKUP_ENABLED != true). Sleeping indefinitely..."
+          tail -f /dev/null
+        fi
         apk add --no-cache aws-cli redis bash
         printf '%s /backup.sh\n' "$${BACKUP_SCHEDULE}" > /etc/crontabs/root
         crond -f -l 2
