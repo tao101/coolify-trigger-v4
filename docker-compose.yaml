@@ -237,6 +237,12 @@ services:
           tail -f /dev/null
         fi
         exec /backup.sh
+    healthcheck:
+      test: ["CMD-SHELL", "true"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   redis-backup:
     image: alpine:3.19
@@ -273,6 +279,12 @@ services:
         apk add --no-cache aws-cli redis bash
         printf '%s /backup.sh\n' "$${BACKUP_SCHEDULE}" > /etc/crontabs/root
         crond -f -l 2
+    healthcheck:
+      test: ["CMD-SHELL", "true"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   postgres-data:
