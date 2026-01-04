@@ -13,7 +13,7 @@ services:
     command: "sh -c \"chown -R node:node /home/node/shared && exec ./scripts/entrypoint.sh\"\n"
     environment:
       RUN_ENGINE_TASKS_PER_WORKER: 50
-      RUN_ENGINE_WORKER_COUNT: 16
+      RUN_ENGINE_WORKER_COUNT: 20
       DATABASE_CONNECTION_LIMIT: 200
       DEFAULT_ENV_EXECUTION_CONCURRENCY_LIMIT: 1000
       DEFAULT_ORG_EXECUTION_CONCURRENCY_LIMIT: 3000
@@ -42,7 +42,7 @@ services:
       OBJECT_STORE_BASE_URL: 'http://minio:9000'
       OBJECT_STORE_ACCESS_KEY_ID: admin
       OBJECT_STORE_SECRET_ACCESS_KEY: '${SERVICE_PASSWORD_MINIO}'
-      GRACEFUL_SHUTDOWN_TIMEOUT: 1000
+      GRACEFUL_SHUTDOWN_TIMEOUT: 30000
       NODE_MAX_OLD_SPACE_SIZE: ${NODE_MAX_OLD_SPACE_SIZE:-8192}
       TRIGGER_BOOTSTRAP_ENABLED: 1
       TRIGGER_BOOTSTRAP_WORKER_GROUP_NAME: bootstrap
@@ -182,8 +182,8 @@ services:
     command: "sh -c \"chown -R node:node /home/node/shared && exec /usr/bin/dumb-init -- pnpm run --filter supervisor start\"\n"
     environment:
       DOCKER_ENFORCE_MACHINE_PRESETS: false
-      TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: 10
-      TRIGGER_DEQUEUE_MAX_RUN_COUNT: 100
+      TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: 5
+      TRIGGER_DEQUEUE_MAX_RUN_COUNT: 10
       TRIGGER_API_URL: http://trigger:3000
       OTEL_EXPORTER_OTLP_ENDPOINT: http://trigger:3000/otel
       TRIGGER_WORKER_TOKEN: 'file:///home/node/shared/worker_token'
@@ -198,7 +198,7 @@ services:
       DOCKER_REGISTRY_PASSWORD: '${REGISTRY_PASSWORD:-very-secure-indeed}'
       DEBUG: 1
       ENFORCE_MACHINE_PRESETS: 1
-      TRIGGER_DEQUEUE_INTERVAL_MS: 500
+      TRIGGER_DEQUEUE_INTERVAL_MS: 1000
     volumes:
       - 'shared-data:/home/node/shared'
     healthcheck:
