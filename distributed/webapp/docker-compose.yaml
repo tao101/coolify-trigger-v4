@@ -39,7 +39,7 @@ services:
       DEPLOY_REGISTRY_HOST: '${SERVICE_FQDN_REGISTRY}'
       DEPLOY_REGISTRY_NAMESPACE: '${REGISTRY_NAMESPACE:-trigger}'
       DEPLOY_REGISTRY_USERNAME: ${REGISTRY_USERNAME:-trigger}
-      DEPLOY_REGISTRY_PASSWORD: '${REGISTRY_PASSWORD:-very-secure-indeed}'
+      DEPLOY_REGISTRY_PASSWORD: '${SERVICE_PASSWORD_REGISTRY}'
       OBJECT_STORE_BASE_URL: 'http://minio:9000'
       OBJECT_STORE_ACCESS_KEY_ID: admin
       OBJECT_STORE_SECRET_ACCESS_KEY: '${SERVICE_PASSWORD_MINIO}'
@@ -149,9 +149,17 @@ services:
   registry:
     image: 'registry:2'
     restart: unless-stopped
-    volumes:
-      - '../../registry:/auth'
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        apk add --no-cache apache2-utils
+        mkdir -p /auth
+        htpasswd -Bbn "$${REGISTRY_USERNAME}" "$${REGISTRY_PASSWORD}" > /auth/htpasswd
+        exec /entrypoint.sh /etc/docker/registry/config.yml
     environment:
+      REGISTRY_USERNAME: ${REGISTRY_USERNAME:-trigger}
+      REGISTRY_PASSWORD: '${SERVICE_PASSWORD_REGISTRY}'
       REGISTRY_AUTH: htpasswd
       REGISTRY_AUTH_HTPASSWD_REALM: 'Registry Realm'
       REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
