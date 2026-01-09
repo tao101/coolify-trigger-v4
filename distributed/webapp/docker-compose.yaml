@@ -133,12 +133,32 @@ services:
   clickhouse:
     image: 'bitnamilegacy/clickhouse:latest'
     restart: unless-stopped
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /bitnami/clickhouse/etc/config.d
+        cat > /bitnami/clickhouse/etc/config.d/override.xml << 'XMLEOF'
+        <clickhouse>
+            <logger><level>warning</level></logger>
+            <mark_cache_size>524288000</mark_cache_size>
+            <concurrent_threads_soft_limit_num>1</concurrent_threads_soft_limit_num>
+            <profiles>
+                <default>
+                <max_block_size>8192</max_block_size>
+                <max_download_threads>1</max_download_threads>
+                <input_format_parallel_parsing>0</input_format_parallel_parsing>
+                <output_format_parallel_formatting>0</output_format_parallel_formatting>
+                </default>
+            </profiles>
+        </clickhouse>
+        XMLEOF
+        exec /opt/bitnami/scripts/clickhouse/entrypoint.sh /opt/bitnami/scripts/clickhouse/run.sh
     environment:
       CLICKHOUSE_ADMIN_USER: ${CLICKHOUSE_ADMIN_USER:-default}
       CLICKHOUSE_ADMIN_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
     volumes:
       - 'clickhouse-data:/bitnami/clickhouse'
-      - '../../clickhouse/override.xml:/bitnami/clickhouse/etc/config.d/override.xml:ro'
     healthcheck:
       test: ["CMD", "clickhouse-client", "--host", "localhost", "--port", "9000", "--user", "${CLICKHOUSE_ADMIN_USER:-default}", "--password", "${SERVICE_PASSWORD_64_CLICKHOUSE}", "--query", "SELECT 1"]
       interval: 5s

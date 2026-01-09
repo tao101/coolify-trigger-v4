@@ -22,16 +22,26 @@ See [`distributed/README.md`](./distributed/README.md) for detailed setup instru
 
 ## Quick Start with Coolify v4
 
+### Deployment Methods
+
+You can deploy using either method:
+
+**Option A: Link Repository** (recommended for auto-updates)
+1. Go to Coolify v4 > Projects > New > **Public GitHub**
+2. Enter repository URL: `https://github.com/essamamdani/coolify-trigger-v4.git`
+3. Select "Build" > "docker-compose"
+
+**Option B: Copy-Paste Docker Compose** (no repo link needed)
+1. Go to Coolify v4 > Projects > New > **Docker Compose**
+2. Copy the contents of `docker-compose.yaml` and paste directly
+3. All configurations are self-contained - no external file dependencies
+
 ### Initial Setup
 
-1. **Create New Project**: Go to Coolify v4 > Projects > New > Public GitHub
-2. **Repository URL**: `https://github.com/essamamdani/coolify-trigger-v4.git`
-3. **Build Settings**: Select "Build" > "docker-compose"
-4. **Click Next**
-5. **Add Ports**:
+1. **Add Ports**:
    - Web App: `:3000` (use Coolify generated URL or custom domain)
    - Registry: `:5000` (use Coolify generated URL or custom domain)
-6. **Deploy** the application
+2. **Deploy** the application
 
 ### Post-Deployment Configuration
 

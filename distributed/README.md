@@ -59,12 +59,19 @@ Deploy Trigger.dev across multiple servers for high-concurrency workloads (1000+
 
 #### 1.1 Create the Service
 
+**Option A: Link Repository**
 1. Go to **Coolify** → Your Project → **Add Resource**
 2. Select **Public Repository**
 3. Enter repository URL: `https://github.com/YOUR-USERNAME/coolify-trigger-v4.git`
 4. Set **Base Directory**: `distributed/webapp`
 5. Select **Docker Compose** as build pack
 6. Click **Continue**
+
+**Option B: Copy-Paste** (no repo link needed)
+1. Go to **Coolify** → Your Project → **Add Resource**
+2. Select **Docker Compose**
+3. Copy contents of `distributed/webapp/docker-compose.yaml` and paste directly
+4. All configurations are self-contained - no external file dependencies
 
 #### 1.2 Configure Ports
 
@@ -128,11 +135,17 @@ Repeat for each worker server:
 
 #### 2.1 Create the Service
 
+**Option A: Link Repository**
 1. Go to **Coolify** → Select the worker server → **Add Resource**
 2. Select **Public Repository**
 3. Enter the same repository URL
 4. Set **Base Directory**: `distributed/worker`
 5. Select **Docker Compose** as build pack
+
+**Option B: Copy-Paste** (no repo link needed)
+1. Go to **Coolify** → Select the worker server → **Add Resource**
+2. Select **Docker Compose**
+3. Copy contents of `distributed/worker/docker-compose.yaml` and paste directly
 
 #### 2.2 Set Environment Variables
 
