@@ -225,7 +225,7 @@ services:
       TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: 5
       TRIGGER_DEQUEUE_MAX_RUN_COUNT: 20
       TRIGGER_API_URL: http://trigger:3000
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://trigger:3000/otel
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://trigger:3000
       TRIGGER_WORKER_TOKEN: 'file:///home/node/shared/worker_token'
       MANAGED_WORKER_SECRET: ${SERVICE_PASSWORD_MANAGEDWORKER}
       TRIGGER_WORKLOAD_API_DOMAIN: supervisor
