@@ -1,6 +1,6 @@
 services:
   trigger:
-    image: 'ghcr.io/triggerdotdev/trigger.dev:main'
+    image: 'ghcr.io/triggerdotdev/trigger.dev:v4.3.0'
     restart: unless-stopped
     depends_on:
       clickhouse:
@@ -165,7 +165,7 @@ services:
       start_period: 10s
 
   supervisor:
-    image: 'ghcr.io/triggerdotdev/supervisor:v4-beta'
+    image: 'ghcr.io/triggerdotdev/supervisor:v4.3.0'
     restart: unless-stopped
     depends_on:
       - docker-proxy
