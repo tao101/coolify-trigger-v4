@@ -256,6 +256,85 @@ If you lost the worker token:
 
 ---
 
+## Production Security Checklist
+
+Before going to production, verify these security measures:
+
+### Firewall Requirements
+
+| Server | Port | Access |
+|--------|------|--------|
+| Webapp | 3000 | Public (via reverse proxy with HTTPS) |
+| Webapp | 5000 | Public (registry, via reverse proxy with HTTPS) |
+| Worker | 8020 | **Webapp IP only** - restrict to webapp server |
+
+> **Important**: Port 8020 on workers exposes the workload API. Restrict access to only the webapp server IP using firewall rules.
+
+```bash
+# Example: Allow only webapp IP to access worker port 8020
+# On each worker server (replace WEBAPP_IP with actual IP):
+sudo ufw allow from WEBAPP_IP to any port 8020
+sudo ufw deny 8020
+```
+
+### Security Features Enabled
+
+- [x] Container security hardening (`no-new-privileges`)
+- [x] Resource limits on all services (prevents resource exhaustion)
+- [x] Log rotation (prevents disk filling)
+- [x] Secrets via environment variables (no hardcoded credentials)
+- [x] Docker socket proxy (limited API access, read-only socket mount)
+
+### Pre-Production Checklist
+
+- [ ] HTTPS configured for webapp and registry domains
+- [ ] Firewall rules restrict port 8020 to webapp IP only
+- [ ] Resource limits configured for your server tier (see `.env-example`)
+- [ ] Backup strategy configured (`BACKUP_ENABLED=true`)
+- [ ] Monitoring/alerting set up for service health
+
+---
+
+## Server Tiers (Hetzner Cloud NVMe)
+
+Both webapp and worker compose files include optimized configurations for Hetzner Cloud servers with NVMe storage.
+
+### Available Tiers
+
+| Tier | vCPU | RAM | Use Case |
+|------|------|-----|----------|
+| 1 | 4 | 16GB | Minimum / Development |
+| 2 | 8 | 32GB | Small production |
+| 3 | 16 | 64GB | Medium production |
+| 4 | 32 | 128GB | Large production |
+
+### Configuring Your Tier
+
+1. Open `.env-example` for your service (webapp or worker)
+2. Find the tier sections (PostgreSQL, Redis, ClickHouse, Resource Limits)
+3. Comment out TIER 1 values
+4. Uncomment your tier's values
+5. Copy to your actual `.env` or Coolify environment variables
+
+### NVMe Optimizations Applied
+
+The following optimizations are applied for NVMe storage:
+
+**PostgreSQL:**
+- `random_page_cost=1.1` - NVMe has near-sequential random I/O
+- `effective_io_concurrency=200` - NVMe handles 200+ parallel I/O ops
+- Larger WAL buffers and checkpoint intervals
+
+**Redis:**
+- I/O threading enabled (`io-threads`, `io-threads-do-reads`)
+- `appendfsync everysec` - safe and performant on NVMe
+
+**ClickHouse:**
+- Parallel parsing enabled (was disabled for HDD)
+- Higher thread counts and block sizes
+
+---
+
 ## Updating
 
 1. **Webapp**: Pull latest and redeploy (databases persist)

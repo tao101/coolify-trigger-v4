@@ -17,6 +17,9 @@ For workloads requiring 1000+ concurrent tasks, use the **distributed setup** in
 - Run workers on multiple servers
 - Scale horizontally as needed
 - Keep all workers managed by a single webapp
+- **Production-ready**: Security hardening, resource limits, log rotation
+- **NVMe optimized**: Tuned for Hetzner Cloud servers with NVMe storage
+- **4 server tiers**: Pre-configured for 4/8/16/32 vCPU servers
 
 See [`distributed/README.md`](./distributed/README.md) for detailed setup instructions.
 

@@ -41,7 +41,7 @@ services:
       DEPLOY_REGISTRY_USERNAME: ${REGISTRY_USERNAME:-trigger}
       DEPLOY_REGISTRY_PASSWORD: '${SERVICE_PASSWORD_REGISTRY}'
       OBJECT_STORE_BASE_URL: 'http://minio:9000'
-      OBJECT_STORE_ACCESS_KEY_ID: admin
+      OBJECT_STORE_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
       OBJECT_STORE_SECRET_ACCESS_KEY: '${SERVICE_PASSWORD_MINIO}'
       GRACEFUL_SHUTDOWN_TIMEOUT: 30000
       NODE_MAX_OLD_SPACE_SIZE: ${NODE_MAX_OLD_SPACE_SIZE:-8192}
@@ -69,6 +69,16 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '${TRIGGER_CPUS:-2}'
+          memory: ${TRIGGER_MEMORY:-4G}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   postgres:
     image: postgres:14
@@ -77,17 +87,35 @@ services:
       - -c
       - wal_level=logical
       - -c
-      - max_connections=1000
+      - max_connections=${PG_MAX_CONNECTIONS:-1000}
+      # Memory settings (configurable via env vars - see .env-example for tier configs)
       - -c
-      - shared_buffers=512MB
+      - shared_buffers=${PG_SHARED_BUFFERS:-4GB}
       - -c
-      - effective_cache_size=2GB
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-12GB}
       - -c
-      - work_mem=32MB
+      - work_mem=${PG_WORK_MEM:-64MB}
       - -c
-      - maintenance_work_mem=256MB
+      - maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-1GB}
       - -c
       - checkpoint_completion_target=0.9
+      # NVMe optimizations (Hetzner Cloud)
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - wal_buffers=64MB
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - default_statistics_target=100
+      - -c
+      - huge_pages=try
     environment:
       POSTGRES_USER: 'postgres'
       POSTGRES_PASSWORD: '${SERVICE_PASSWORD_POSTGRES}'
@@ -100,11 +128,30 @@ services:
       timeout: 20s
       retries: 10
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '${POSTGRES_CPUS:-2}'
+          memory: ${POSTGRES_MEMORY:-6G}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   redis:
     image: 'redis:7'
     restart: unless-stopped
-    command: redis-server --maxmemory 4gb --maxmemory-policy noeviction --appendonly yes --tcp-keepalive 300
+    # NVMe optimized with I/O threading (configurable via env vars)
+    command: >-
+      redis-server
+      --maxmemory ${REDIS_MAXMEMORY:-6gb}
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --tcp-keepalive 300
+      --io-threads ${REDIS_IO_THREADS:-4}
+      --io-threads-do-reads yes
     volumes:
       - 'redis-data:/data'
     healthcheck:
@@ -113,6 +160,16 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '${REDIS_CPUS:-1}'
+          memory: ${REDIS_MEMORY:-7G}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   electric:
     image: 'electricsql/electric:1.0.24'
@@ -129,26 +186,38 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '${ELECTRIC_CPUS:-1}'
+          memory: ${ELECTRIC_MEMORY:-1G}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   clickhouse:
     image: 'bitnamilegacy/clickhouse:latest'
     restart: unless-stopped
     entrypoint: /bin/bash
+    # NVMe optimized with parallel processing enabled (configurable via env vars)
     command:
       - -c
       - |
         mkdir -p /bitnami/clickhouse/etc/config.d
-        cat > /bitnami/clickhouse/etc/config.d/override.xml << 'XMLEOF'
+        cat > /bitnami/clickhouse/etc/config.d/override.xml << XMLEOF
         <clickhouse>
             <logger><level>warning</level></logger>
-            <mark_cache_size>524288000</mark_cache_size>
-            <concurrent_threads_soft_limit_num>1</concurrent_threads_soft_limit_num>
+            <mark_cache_size>${CH_MARK_CACHE_SIZE:-1073741824}</mark_cache_size>
+            <max_concurrent_queries>100</max_concurrent_queries>
             <profiles>
                 <default>
-                <max_block_size>8192</max_block_size>
-                <max_download_threads>1</max_download_threads>
-                <input_format_parallel_parsing>0</input_format_parallel_parsing>
-                <output_format_parallel_formatting>0</output_format_parallel_formatting>
+                    <max_threads>${CH_MAX_THREADS:-4}</max_threads>
+                    <max_block_size>65536</max_block_size>
+                    <max_download_threads>${CH_MAX_THREADS:-4}</max_download_threads>
+                    <input_format_parallel_parsing>1</input_format_parallel_parsing>
+                    <output_format_parallel_formatting>1</output_format_parallel_formatting>
                 </default>
             </profiles>
         </clickhouse>
@@ -157,6 +226,8 @@ services:
     environment:
       CLICKHOUSE_ADMIN_USER: ${CLICKHOUSE_ADMIN_USER:-default}
       CLICKHOUSE_ADMIN_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
+      CH_MAX_THREADS: ${CH_MAX_THREADS:-4}
+      CH_MARK_CACHE_SIZE: ${CH_MARK_CACHE_SIZE:-1073741824}
     volumes:
       - 'clickhouse-data:/bitnami/clickhouse'
     healthcheck:
@@ -165,6 +236,16 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '${CLICKHOUSE_CPUS:-1}'
+          memory: ${CLICKHOUSE_MEMORY:-2G}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   registry:
     image: 'registry:2'
@@ -190,12 +271,22 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '${REGISTRY_CPUS:-1}'
+          memory: ${REGISTRY_MEMORY:-512M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   minio:
     image: bitnamilegacy/minio:latest
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: admin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
       MINIO_ROOT_PASSWORD: '${SERVICE_PASSWORD_MINIO}'
       MINIO_DEFAULT_BUCKETS: packets
       MINIO_BROWSER: 'on'
@@ -207,6 +298,16 @@ services:
       timeout: 10s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '${MINIO_CPUS:-1}'
+          memory: ${MINIO_MEMORY:-1G}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # ============================================
   # BACKUP SERVICES (Optional - set BACKUP_ENABLED=true to enable)
