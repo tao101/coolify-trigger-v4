@@ -146,7 +146,7 @@ services:
     command: >-
       redis-server
       --maxmemory ${REDIS_MAXMEMORY:-6gb}
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
       --appendonly yes
       --appendfsync everysec
       --tcp-keepalive 300
