@@ -262,6 +262,8 @@ services:
   registry:
     image: 'registry:2'
     restart: unless-stopped
+    ports:
+      - "5000:5000"
     entrypoint: /bin/sh
     command:
       - -c
