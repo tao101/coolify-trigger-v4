@@ -39,9 +39,10 @@ services:
       DOCKER_REGISTRY_PASSWORD: ${REGISTRY_PASSWORD}
 
       # Scaling settings (adjust based on server capacity)
+      # Defaults match Trigger.dev recommendations for fast task startup
       TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: ${DEQUEUE_CONSUMER_COUNT:-5}
-      TRIGGER_DEQUEUE_MAX_RUN_COUNT: ${DEQUEUE_RUN_COUNT:-5}
-      TRIGGER_DEQUEUE_INTERVAL_MS: ${DEQUEUE_INTERVAL_MS:-1000}
+      TRIGGER_DEQUEUE_MAX_RUN_COUNT: ${DEQUEUE_RUN_COUNT:-10}
+      TRIGGER_DEQUEUE_INTERVAL_MS: ${DEQUEUE_INTERVAL_MS:-250}
 
       # Machine presets enforcement
       ENFORCE_MACHINE_PRESETS: ${ENFORCE_MACHINE_PRESETS:-1}
