@@ -31,7 +31,8 @@ services:
       DOCKER_HOST: tcp://docker-proxy:2375
       DOCKER_RUNNER_NETWORKS: ${DOCKER_RUNNER_NETWORKS:-trigger-worker-net}
       DOCKER_AUTOREMOVE_EXITED_CONTAINERS: 1
-      DOCKER_ENFORCE_MACHINE_PRESETS: ${DOCKER_ENFORCE_MACHINE_PRESETS:-true}
+      # Disable machine preset limits for faster task startup (removes CPU/memory constraints)
+      DOCKER_ENFORCE_MACHINE_PRESETS: ${DOCKER_ENFORCE_MACHINE_PRESETS:-false}
 
       # Registry settings (must match webapp)
       DOCKER_REGISTRY_URL: ${DOCKER_REGISTRY_URL}
@@ -39,12 +40,16 @@ services:
       DOCKER_REGISTRY_PASSWORD: ${REGISTRY_PASSWORD}
 
       # Scaling settings (adjust based on server capacity)
+      # Defaults match Trigger.dev recommendations for fast task startup
       TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: ${DEQUEUE_CONSUMER_COUNT:-5}
-      TRIGGER_DEQUEUE_MAX_RUN_COUNT: ${DEQUEUE_RUN_COUNT:-5}
-      TRIGGER_DEQUEUE_INTERVAL_MS: ${DEQUEUE_INTERVAL_MS:-1000}
+      TRIGGER_DEQUEUE_MAX_RUN_COUNT: ${DEQUEUE_RUN_COUNT:-10}
+      TRIGGER_DEQUEUE_INTERVAL_MS: ${DEQUEUE_INTERVAL_MS:-250}
 
-      # Machine presets enforcement
-      ENFORCE_MACHINE_PRESETS: ${ENFORCE_MACHINE_PRESETS:-1}
+      # Runner settings for faster task execution
+      RUNNER_SNAPSHOT_POLL_INTERVAL_SECONDS: ${RUNNER_SNAPSHOT_POLL_INTERVAL_SECONDS:-1}
+
+      # Machine presets enforcement (0 = disabled for faster startup)
+      ENFORCE_MACHINE_PRESETS: ${ENFORCE_MACHINE_PRESETS:-0}
 
       # Debug mode
       DEBUG: ${DEBUG:-0}
