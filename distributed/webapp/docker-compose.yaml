@@ -1,6 +1,6 @@
 services:
   trigger:
-    image: 'ghcr.io/triggerdotdev/trigger.dev:v4.3.0'
+    image: 'ghcr.io/triggerdotdev/trigger.dev@sha256:b208b821aebeafe1e814618e92009e104bcb66d7b67d9aee580f5b12ce9391ca'
     restart: unless-stopped
     depends_on:
       postgres:
@@ -19,6 +19,8 @@ services:
     command: |
       sh -c "chown -R node:node /home/node/shared && exec ./scripts/entrypoint.sh"
     environment:
+      # Coolify magic variable - exposes trigger on port 3000 with auto-generated URL
+      SERVICE_FQDN_TRIGGER_3000: ''
       RUN_ENGINE_TASKS_PER_WORKER: 50
       RUN_ENGINE_WORKER_COUNT: 20
       DATABASE_CONNECTION_LIMIT: 200
@@ -32,9 +34,10 @@ services:
       MASTER_QUEUE_CONSUMER_DEQUEUE_COUNT: 20
       PROCESS_WORKER_QUEUE_DEBOUNCE_MS: 100
       REMIX_APP_PORT: 3000
-      APP_ORIGIN: ${SERVICE_URL_TRIGGER}
-      LOGIN_ORIGIN: ${SERVICE_URL_TRIGGER}
-      API_ORIGIN: ${SERVICE_URL_TRIGGER}
+      # Using FQDN instead of SERVICE_URL (FQDN is just the domain, so we add https://)
+      APP_ORIGIN: 'https://${SERVICE_FQDN_TRIGGER}'
+      LOGIN_ORIGIN: 'https://${SERVICE_FQDN_TRIGGER}'
+      API_ORIGIN: 'https://${SERVICE_FQDN_TRIGGER}'
       SESSION_SECRET: '${SERVICE_PASSWORD_SESSION}'
       MAGIC_LINK_SECRET: '${SERVICE_PASSWORD_MAGIC}'
       ENCRYPTION_KEY: '${SERVICE_PASSWORD_ENCRYPTION}'
@@ -45,7 +48,7 @@ services:
       REDIS_PORT: 6379
       REDIS_TLS_DISABLED: true
       ELECTRIC_ORIGIN: 'http://electric:3000'
-      DEV_OTEL_EXPORTER_OTLP_ENDPOINT: '${SERVICE_URL_TRIGGER}/otel'
+      DEV_OTEL_EXPORTER_OTLP_ENDPOINT: 'https://${SERVICE_FQDN_TRIGGER}/otel'
       DEPLOY_REGISTRY_HOST: '${SERVICE_FQDN_REGISTRY}'
       DEPLOY_REGISTRY_NAMESPACE: '${REGISTRY_NAMESPACE:-trigger}'
       DEPLOY_REGISTRY_USERNAME: ${REGISTRY_USERNAME:-trigger}
