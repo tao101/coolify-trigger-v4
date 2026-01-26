@@ -16,6 +16,22 @@ services:
     environment:
       # Coolify magic variable - exposes trigger on port 3000 with auto-generated URL
       SERVICE_FQDN_TRIGGER_3000: ''
+      # Database connection
+      DATABASE_CONNECTION_LIMIT: 350
+      # Concurrency limits
+      DEFAULT_ENV_EXECUTION_CONCURRENCY_LIMIT: 1000
+      DEFAULT_ORG_EXECUTION_CONCURRENCY_LIMIT: 3000
+      # Run engine
+      RUN_ENGINE_WORKER_COUNT: 20
+      RUN_ENGINE_TASKS_PER_WORKER: 50
+      WORKER_CONCURRENCY: 50
+      # Queue sizes
+      MAXIMUM_DEV_QUEUE_SIZE: 30000
+      MAXIMUM_DEPLOYED_QUEUE_SIZE: 150000
+      # Queue polling optimization
+      MASTER_QUEUE_CONSUMERS_INTERVAL_MS: 250
+      MASTER_QUEUE_CONSUMER_DEQUEUE_COUNT: 20
+      PROCESS_WORKER_QUEUE_DEBOUNCE_MS: 100
       REMIX_APP_PORT: 3000
       # Using FQDN instead of SERVICE_URL (FQDN is just the domain, so we add https://)
       APP_ORIGIN: 'https://${SERVICE_FQDN_TRIGGER}'
@@ -43,7 +59,7 @@ services:
       OBJECT_STORE_ACCESS_KEY_ID: admin
       OBJECT_STORE_SECRET_ACCESS_KEY: '${SERVICE_PASSWORD_MINIO}'
       GRACEFUL_SHUTDOWN_TIMEOUT: 1000
-      NODE_MAX_OLD_SPACE_SIZE: ${NODE_MAX_OLD_SPACE_SIZE:-1024}
+      NODE_MAX_OLD_SPACE_SIZE: ${NODE_MAX_OLD_SPACE_SIZE:-16384}
       TRIGGER_BOOTSTRAP_ENABLED: 1
       TRIGGER_BOOTSTRAP_WORKER_GROUP_NAME: bootstrap
       TRIGGER_BOOTSTRAP_WORKER_TOKEN_PATH: /home/node/shared/worker_token
@@ -74,13 +90,14 @@ services:
       start_period: 30s
 
   electric:
-    image: 'electricsql/electric:1.0.24'
+    image: 'electricsql/electric:1.2.9'
     restart: unless-stopped
     environment:
       # External PostgreSQL connection
       DATABASE_URL: '${DATABASE_URL}'
-      ELECTRIC_INSECURE: 'true'
+      ELECTRIC_SECRET: '${SERVICE_PASSWORD_64_ELECTRIC}'
       ELECTRIC_USAGE_REPORTING: 'false'
+      ELECTRIC_DB_POOL_SIZE: 20
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/v1/health"]
       interval: 10s
@@ -89,45 +106,22 @@ services:
       start_period: 10s
 
   clickhouse:
-    image: 'bitnamilegacy/clickhouse:latest'
+    image: 'clickhouse/clickhouse-server:25.8'
     restart: unless-stopped
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        mkdir -p /bitnami/clickhouse/etc/config.d
-        cat > /bitnami/clickhouse/etc/config.d/override.xml << 'XMLEOF'
-        <clickhouse>
-            <listen_host>0.0.0.0</listen_host>
-            <logger><level>warning</level></logger>
-            <mark_cache_size>1073741824</mark_cache_size>
-            <max_concurrent_queries>100</max_concurrent_queries>
-            <profiles>
-                <default>
-                    <!-- General parallelism -->
-                    <max_threads>8</max_threads>
-                    <max_block_size>65536</max_block_size>
-                    <max_download_threads>8</max_download_threads>
-                    <input_format_parallel_parsing>1</input_format_parallel_parsing>
-                    <output_format_parallel_formatting>1</output_format_parallel_formatting>
-                    <!-- FINAL query optimizations (7-30x faster for 1000+ runs) -->
-                    <max_final_threads>16</max_final_threads>
-                    <do_not_merge_across_partitions_select_final>1</do_not_merge_across_partitions_select_final>
-                    <optimize_move_to_prewhere>1</optimize_move_to_prewhere>
-                    <optimize_move_to_prewhere_if_final>1</optimize_move_to_prewhere_if_final>
-                </default>
-            </profiles>
-        </clickhouse>
-        XMLEOF
-        exec /opt/bitnami/scripts/clickhouse/entrypoint.sh /opt/bitnami/scripts/clickhouse/run.sh
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     environment:
-      CLICKHOUSE_ADMIN_USER: ${CLICKHOUSE_ADMIN_USER:-default}
-      CLICKHOUSE_ADMIN_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
+      CLICKHOUSE_USER: ${CLICKHOUSE_ADMIN_USER:-default}
+      CLICKHOUSE_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      - 'clickhouse-data:/bitnami/clickhouse'
+      - 'clickhouse-data:/var/lib/clickhouse'
+      - 'clickhouse-logs:/var/log/clickhouse-server'
     healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/8123'"]
-      interval: 5s
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1']
+      interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
@@ -185,6 +179,19 @@ services:
     user: root
     command: "sh -c \"chown -R node:node /home/node/shared && exec /usr/bin/dumb-init -- pnpm run --filter supervisor start\"\n"
     environment:
+      # Dequeue settings optimized for high throughput
+      TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: 5
+      TRIGGER_DEQUEUE_MAX_RUN_COUNT: 10
+      TRIGGER_DEQUEUE_INTERVAL_MS: 250
+      TRIGGER_DEQUEUE_IDLE_INTERVAL_MS: 500
+      TRIGGER_DEQUEUE_MIN_CONSUMER_COUNT: 2
+      TRIGGER_DEQUEUE_SCALING_STRATEGY: aggressive
+      TRIGGER_DEQUEUE_SCALING_UP_COOLDOWN_MS: 2000
+      # Disable machine preset limits for faster task startup
+      DOCKER_ENFORCE_MACHINE_PRESETS: false
+      ENFORCE_MACHINE_PRESETS: 0
+      # Runner settings for faster task execution
+      RUNNER_SNAPSHOT_POLL_INTERVAL_SECONDS: 1
       TRIGGER_API_URL: http://trigger:3000
       OTEL_EXPORTER_OTLP_ENDPOINT: http://trigger:3000
       TRIGGER_WORKER_TOKEN: 'file:///home/node/shared/worker_token'
@@ -197,12 +204,7 @@ services:
       DOCKER_REGISTRY_URL: 'https://${SERVICE_FQDN_REGISTRY}'
       DOCKER_REGISTRY_USERNAME: ${REGISTRY_USERNAME:-trigger}
       DOCKER_REGISTRY_PASSWORD: '${SERVICE_PASSWORD_REGISTRY}'
-      DEBUG: 1
-      DOCKER_ENFORCE_MACHINE_PRESETS: true
-      TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: 5
-      TRIGGER_DEQUEUE_MAX_RUN_COUNT: 5
-      ENFORCE_MACHINE_PRESETS: 1
-      TRIGGER_DEQUEUE_INTERVAL_MS: 1000
+      DEBUG: 0
     volumes:
       - 'shared-data:/home/node/shared'
     healthcheck:
@@ -233,6 +235,7 @@ services:
 
 volumes:
   clickhouse-data:
+  clickhouse-logs:
   minio-data:
   shared-data:
   registry-data:

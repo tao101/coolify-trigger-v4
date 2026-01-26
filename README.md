@@ -126,6 +126,35 @@ Coolify automatically generates all required `SERVICE_*` environment variables. 
 
 All services communicate through the `trigger-net` Docker network. The setup is designed to work behind Coolify's reverse proxy.
 
+## Host Requirements
+
+### Redis Memory Overcommit
+
+Redis requires the `vm.overcommit_memory` kernel parameter to be enabled on the host for optimal operation. Without it, you'll see this warning in Redis logs:
+
+```
+WARNING Memory overcommit must be enabled! Without it, a background save or replication may fail under low memory condition.
+```
+
+**Why this can't be fixed in docker-compose:**
+- `vm.overcommit_memory` is a system-wide kernel parameter (not namespaced)
+- Docker explicitly blocks it in the sysctl whitelist
+- Must be set on the host operating system
+
+**To fix (run on your Coolify server):**
+
+```bash
+# Apply immediately
+sudo sysctl vm.overcommit_memory=1
+
+# Persist across reboots
+echo 'vm.overcommit_memory = 1' | sudo tee -a /etc/sysctl.conf
+```
+
+**For cloud deployments**, add this to your server provisioning script or cloud-init.
+
+> **Note:** The warning is non-fatal. Redis works correctly in most scenarios. Issues only occur during background saves (BGSAVE) or replication under extreme memory pressure.
+
 ## Volumes
 
 The following persistent volumes are used:

@@ -67,15 +67,6 @@ services:
     # Security hardening
     security_opt:
       - no-new-privileges:true
-    # Resource limits (configure in .env based on server tier)
-    deploy:
-      resources:
-        limits:
-          cpus: '${SUPERVISOR_CPUS:-3}'
-          memory: ${SUPERVISOR_MEMORY:-14G}
-        reservations:
-          cpus: '${SUPERVISOR_CPUS_RESERVED:-2}'
-          memory: ${SUPERVISOR_MEMORY_RESERVED:-8G}
     # Log rotation
     logging:
       driver: "json-file"
@@ -104,12 +95,6 @@ services:
     # Security hardening
     security_opt:
       - no-new-privileges:true
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '${DOCKER_PROXY_CPUS:-1}'
-          memory: ${DOCKER_PROXY_MEMORY:-1G}
     # Log rotation
     logging:
       driver: "json-file"

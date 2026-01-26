@@ -52,6 +52,25 @@ Deploy Trigger.dev across multiple servers for high-concurrency workloads (1000+
 - [ ] Multiple servers added to Coolify
 - [ ] Network connectivity between servers
 - [ ] Domain names for webapp and registry (e.g., `trigger.example.com`, `registry.example.com`)
+- [ ] Host kernel configured: `vm.overcommit_memory=1` (see Host Requirements below)
+
+### Host Requirements
+
+Before deploying, configure these kernel parameters on **all servers** (webapp and workers):
+
+#### Redis Memory Overcommit
+
+```bash
+# Apply immediately
+sudo sysctl vm.overcommit_memory=1
+
+# Persist across reboots
+echo 'vm.overcommit_memory = 1' | sudo tee -a /etc/sysctl.conf
+```
+
+**Why?** Redis requires this for reliable background saves. Without it, you'll see warnings in logs (non-fatal, but recommended to fix).
+
+**For Hetzner Cloud:** Add to your server's cloud-init script for automatic configuration on new servers.
 
 ---
 
@@ -244,6 +263,20 @@ If you lost the worker token:
 1. Check webapp logs (if still available)
 2. Or check the shared volume: `cat /path/to/shared-data/worker_token`
 3. The token persists across restarts in the `shared-data` volume
+
+### Redis Memory Warning
+
+If you see `WARNING Memory overcommit must be enabled`:
+
+1. This is a **host-level setting**, not a Docker issue
+2. SSH into the server and run:
+   ```bash
+   sudo sysctl vm.overcommit_memory=1
+   echo 'vm.overcommit_memory = 1' | sudo tee -a /etc/sysctl.conf
+   ```
+3. No container restart needed - takes effect immediately
+
+> The warning is non-fatal but recommended to fix for production stability.
 
 ---
 
