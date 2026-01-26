@@ -225,15 +225,21 @@ services:
         <clickhouse>
             <listen_host>0.0.0.0</listen_host>
             <logger><level>warning</level></logger>
-            <mark_cache_size>${CH_MARK_CACHE_SIZE:-1073741824}</mark_cache_size>
+            <mark_cache_size>${CH_MARK_CACHE_SIZE:-2147483648}</mark_cache_size>
             <max_concurrent_queries>100</max_concurrent_queries>
             <profiles>
                 <default>
-                    <max_threads>${CH_MAX_THREADS:-4}</max_threads>
+                    <!-- General parallelism -->
+                    <max_threads>${CH_MAX_THREADS:-16}</max_threads>
                     <max_block_size>65536</max_block_size>
-                    <max_download_threads>${CH_MAX_THREADS:-4}</max_download_threads>
+                    <max_download_threads>${CH_MAX_THREADS:-16}</max_download_threads>
                     <input_format_parallel_parsing>1</input_format_parallel_parsing>
                     <output_format_parallel_formatting>1</output_format_parallel_formatting>
+                    <!-- FINAL query optimizations (7-30x faster for 1000+ runs) -->
+                    <max_final_threads>32</max_final_threads>
+                    <do_not_merge_across_partitions_select_final>1</do_not_merge_across_partitions_select_final>
+                    <optimize_move_to_prewhere>1</optimize_move_to_prewhere>
+                    <optimize_move_to_prewhere_if_final>1</optimize_move_to_prewhere_if_final>
                 </default>
             </profiles>
         </clickhouse>
@@ -242,8 +248,8 @@ services:
     environment:
       CLICKHOUSE_ADMIN_USER: ${CLICKHOUSE_ADMIN_USER:-default}
       CLICKHOUSE_ADMIN_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
-      CH_MAX_THREADS: ${CH_MAX_THREADS:-4}
-      CH_MARK_CACHE_SIZE: ${CH_MARK_CACHE_SIZE:-1073741824}
+      CH_MAX_THREADS: ${CH_MAX_THREADS:-16}
+      CH_MARK_CACHE_SIZE: ${CH_MARK_CACHE_SIZE:-2147483648}
     volumes:
       - 'clickhouse-data:/bitnami/clickhouse'
     healthcheck:

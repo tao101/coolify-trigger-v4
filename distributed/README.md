@@ -335,6 +335,75 @@ The following optimizations are applied for NVMe storage:
 
 ---
 
+## Performance Tuning for 1000+ Runs
+
+### ClickHouse FINAL Query Optimization
+
+If you experience slow UI performance with 1000+ runs, the root cause is typically slow ClickHouse queries. Trigger.dev uses `FINAL` queries on the `task_runs_v2` table, which can be slow by default.
+
+**Symptoms:**
+- UI becomes laggy/slow with 1000+ runs
+- Queries taking 900-1200ms (visible in ClickHouse logs)
+- CPU/RAM usage appears normal
+
+**Solution (Already Applied):**
+
+The docker-compose files now include optimized ClickHouse settings that make FINAL queries 7-30x faster:
+
+| Setting | Effect |
+|---------|--------|
+| `do_not_merge_across_partitions_select_final=1` | Parallelizes deduplication (**7x faster**) |
+| `max_final_threads=32` | More threads for FINAL merge (**4x faster**) |
+| `optimize_move_to_prewhere_if_final=1` | Pre-filtering before merge (**9x faster**) |
+
+**Expected Results:**
+- Before: 900-1200ms per query
+- After: <100ms per query
+
+### Verifying Query Performance
+
+```bash
+# Check ClickHouse query times
+docker exec -it $(docker ps -qf "name=clickhouse") clickhouse-client \
+  --user default --password '<password>' \
+  --query "SELECT query, query_duration_ms FROM system.query_log
+           WHERE type='QueryFinish' AND query LIKE '%task_runs%'
+           ORDER BY query_duration_ms DESC LIMIT 5"
+```
+
+### Manual Table Optimization
+
+If queries are still slow, you can run periodic optimization to pre-merge data:
+
+```bash
+# Connect to ClickHouse
+docker exec -it $(docker ps -qf "name=clickhouse") clickhouse-client \
+  --user default --password '<password>'
+
+# Optimize the task_runs table (reduces FINAL work at query time)
+OPTIMIZE TABLE trigger_dev.task_runs_v2 FINAL;
+```
+
+Consider running this during low-traffic periods (e.g., daily cron job).
+
+### Other Performance Checks
+
+```bash
+# Check Electric SQL health (realtime sync)
+docker stats --no-stream $(docker ps -qf "name=electric")
+
+# Check PostgreSQL replication lag
+docker exec -it $(docker ps -qf "name=postgres") psql -U postgres -d trigger -c "
+SELECT slot_name, active,
+       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) as replication_lag
+FROM pg_replication_slots;"
+
+# Check Redis memory
+docker exec -it $(docker ps -qf "name=redis") redis-cli INFO memory | grep -E "used_memory_human|maxmemory_human"
+```
+
+---
+
 ## Updating
 
 1. **Webapp**: Pull latest and redeploy (databases persist)
