@@ -20,8 +20,12 @@ services:
     environment:
       # Coolify magic variable - exposes trigger on port 3000 with auto-generated URL
       SERVICE_FQDN_TRIGGER_3000: ''
+      # Run Engine - Balanced for 600 concurrent tasks
+      RUN_ENGINE_WORKER_COUNT: 15
       RUN_ENGINE_TASKS_PER_WORKER: 50
-      RUN_ENGINE_WORKER_COUNT: 20
+      RUN_ENGINE_WORKER_CONCURRENCY_LIMIT: 50
+      RUN_ENGINE_WORKER_POLL_INTERVAL: 200
+      RUN_ENGINE_RATE_LIMIT_MAX: 1500
       DATABASE_CONNECTION_LIMIT: 350
       DEFAULT_ENV_EXECUTION_CONCURRENCY_LIMIT: 1000
       DEFAULT_ORG_EXECUTION_CONCURRENCY_LIMIT: 3000
@@ -97,8 +101,9 @@ services:
       - shared_buffers=512MB
       - -c
       - effective_cache_size=2GB
+      # Increased for better sorting of 70+ task result sets
       - -c
-      - work_mem=128MB
+      - work_mem=256MB
       - -c
       - maintenance_work_mem=256MB
       # Faster commits (slight durability tradeoff for dashboard responsiveness)
@@ -145,10 +150,11 @@ services:
       DATABASE_URL: 'postgresql://postgres:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-trigger}?schema=public&sslmode=disable'
       ELECTRIC_SECRET: '${SERVICE_PASSWORD_64_ELECTRIC}'
       ELECTRIC_USAGE_REPORTING: 'false'
-      ELECTRIC_DB_POOL_SIZE: 150
-      # Cache settings to reduce DB pressure during high concurrency
-      ELECTRIC_CACHE_MAX_AGE: 10
-      ELECTRIC_CACHE_STALE_AGE: 120
+      # Increased pool size for 70+ concurrent task shapes
+      ELECTRIC_DB_POOL_SIZE: 200
+      # Extended cache settings to reduce shape churn and DB pressure
+      ELECTRIC_CACHE_MAX_AGE: 30
+      ELECTRIC_CACHE_STALE_AGE: 300
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/v1/health"]
       interval: 10s
@@ -166,6 +172,72 @@ services:
       CLICKHOUSE_USER: ${CLICKHOUSE_ADMIN_USER:-default}
       CLICKHOUSE_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    # Optimized for 8 vCPU / 32GB RAM
+    command:
+      - /bin/bash
+      - -c
+      - |
+        # Server settings (config.d) - NO profiles here
+        cat > /etc/clickhouse-server/config.d/custom.xml << 'EOF'
+        <clickhouse>
+            <!-- Replace default listen_host (removes ::) with IPv4 only -->
+            <listen_host replace="replace">0.0.0.0</listen_host>
+
+            <!-- Logging: reduce noise -->
+            <logger>
+                <level>warning</level>
+            </logger>
+
+            <!-- Memory settings for 32GB RAM -->
+            <mark_cache_size>5368709120</mark_cache_size> <!-- 5GB -->
+            <uncompressed_cache_size>8589934592</uncompressed_cache_size> <!-- 8GB -->
+            <max_server_memory_usage_to_ram_ratio>0.9</max_server_memory_usage_to_ram_ratio>
+
+            <!-- Concurrency settings for 8 vCPU -->
+            <max_concurrent_queries>150</max_concurrent_queries>
+            <concurrent_threads_soft_limit_num>8</concurrent_threads_soft_limit_num>
+            <background_pool_size>16</background_pool_size>
+            <background_schedule_pool_size>16</background_schedule_pool_size>
+
+            <merge_tree>
+                <max_bytes_to_merge_at_max_space_in_pool>161061273600</max_bytes_to_merge_at_max_space_in_pool>
+                <number_of_free_entries_in_pool_to_execute_mutation>20</number_of_free_entries_in_pool_to_execute_mutation>
+                <!-- Aggressive merging to reduce FINAL query work -->
+                <min_age_to_force_merge_seconds>3600</min_age_to_force_merge_seconds>
+                <min_age_to_force_merge_on_partition_only>1</min_age_to_force_merge_on_partition_only>
+            </merge_tree>
+
+            <!-- Reduce log flush frequency -->
+            <asynchronous_metric_log>
+                <flush_interval_milliseconds>60000</flush_interval_milliseconds>
+            </asynchronous_metric_log>
+            <metric_log>
+                <flush_interval_milliseconds>60000</flush_interval_milliseconds>
+            </metric_log>
+            <query_log>
+                <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+            </query_log>
+        </clickhouse>
+        EOF
+
+        # User/profile settings (users.d) - profiles MUST be here to take effect
+        cat > /etc/clickhouse-server/users.d/custom.xml << 'EOF'
+        <clickhouse>
+            <profiles>
+                <default>
+                    <max_threads>8</max_threads>
+                    <max_block_size>65536</max_block_size>
+                    <input_format_parallel_parsing>1</input_format_parallel_parsing>
+                    <output_format_parallel_formatting>1</output_format_parallel_formatting>
+                    <!-- FINAL query optimizations (7-30x faster for ReplacingMergeTree) -->
+                    <do_not_merge_across_partitions_select_final>1</do_not_merge_across_partitions_select_final>
+                    <max_final_threads>8</max_final_threads>
+                    <optimize_move_to_prewhere_if_final>1</optimize_move_to_prewhere_if_final>
+                </default>
+            </profiles>
+        </clickhouse>
+        EOF
+        exec /entrypoint.sh
     volumes:
       - 'clickhouse-data:/var/lib/clickhouse'
       - 'clickhouse-logs:/var/log/clickhouse-server'
@@ -175,6 +247,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
   registry:
     image: 'registry:2'
     restart: unless-stopped
@@ -230,9 +307,9 @@ services:
       # Disable machine preset limits for faster task startup
       DOCKER_ENFORCE_MACHINE_PRESETS: false
       # Dequeue settings - optimized for fast task pickup during bulk submission
-      TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: 10
-      TRIGGER_DEQUEUE_MAX_RUN_COUNT: 20
-      TRIGGER_DEQUEUE_INTERVAL_MS: 100
+      TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: 8
+      TRIGGER_DEQUEUE_MAX_RUN_COUNT: 15
+      TRIGGER_DEQUEUE_INTERVAL_MS: 300
       # Dequeue scaling for dynamic consumer adjustment
       TRIGGER_DEQUEUE_MIN_CONSUMER_COUNT: 2
       TRIGGER_DEQUEUE_IDLE_INTERVAL_MS: 500

@@ -21,18 +21,30 @@ services:
     environment:
       # Coolify magic variable - exposes trigger on port 3000 with auto-generated URL
       SERVICE_FQDN_TRIGGER_3000: ''
-      RUN_ENGINE_TASKS_PER_WORKER: 50
-      RUN_ENGINE_WORKER_COUNT: 20
-      DATABASE_CONNECTION_LIMIT: 350
+      # Clustering - enable multi-process mode for heavy worker polling
+      ENABLE_CLUSTER: 1
+      WEB_CONCURRENCY: 4
+      # Run Engine - Scaled for heavy worker polling (8 vCPU / 32GB RAM)
+      RUN_ENGINE_WORKER_COUNT: 25
+      RUN_ENGINE_TASKS_PER_WORKER: 40
+      RUN_ENGINE_WORKER_CONCURRENCY_LIMIT: 40
+      RUN_ENGINE_WORKER_POLL_INTERVAL: 500
+      RUN_ENGINE_RATE_LIMIT_MAX: 5000
+      RUN_ENGINE_RATE_LIMIT_REFILL_RATE: 1600
+      API_RATE_LIMIT_MAX: 3000
+      API_RATE_LIMIT_REFILL_RATE: 1000
+      DATABASE_CONNECTION_LIMIT: 750
       DEFAULT_ENV_EXECUTION_CONCURRENCY_LIMIT: 1000
       DEFAULT_ORG_EXECUTION_CONCURRENCY_LIMIT: 3000
-      WORKER_CONCURRENCY: 50
+      WORKER_CONCURRENCY: 40
       MAXIMUM_DEV_QUEUE_SIZE: 30000
       MAXIMUM_DEPLOYED_QUEUE_SIZE: 150000
-      # Master queue polling optimization (fast task acceptance for bulk submission)
-      MASTER_QUEUE_CONSUMERS_INTERVAL_MS: 100
-      MASTER_QUEUE_CONSUMER_DEQUEUE_COUNT: 50
-      PROCESS_WORKER_QUEUE_DEBOUNCE_MS: 50
+      # Queue processing optimization (faster polling for heavy worker load)
+      MASTER_QUEUE_CONSUMERS_INTERVAL_MS: 250
+      MASTER_QUEUE_CONSUMER_DEQUEUE_COUNT: 20
+      MARQS_SHARED_WORKER_QUEUE_CONSUMER_INTERVAL_MS: 100
+      MARQS_SHARED_WORKER_QUEUE_MAX_MESSAGE_COUNT: 20
+      PROCESS_WORKER_QUEUE_DEBOUNCE_MS: 500
       REMIX_APP_PORT: 3000
       # Using FQDN instead of SERVICE_URL (FQDN is just the domain, so we add https://)
       APP_ORIGIN: 'https://${SERVICE_FQDN_TRIGGER}'
@@ -100,14 +112,15 @@ services:
       - -c
       - wal_level=logical
       - -c
-      - max_connections=${PG_MAX_CONNECTIONS:-1000}
-      # Memory settings (configurable via env vars - see .env-example for tier configs)
+      - max_connections=${PG_MAX_CONNECTIONS:-1500}
+      # Memory settings - Optimized for 8 vCPU / 32GB RAM
       - -c
-      - shared_buffers=${PG_SHARED_BUFFERS:-4GB}
+      - shared_buffers=${PG_SHARED_BUFFERS:-8GB}
       - -c
-      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-12GB}
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-24GB}
       - -c
-      - work_mem=${PG_WORK_MEM:-64MB}
+      # Increased for better sorting of 70+ task result sets
+      - work_mem=${PG_WORK_MEM:-256MB}
       - -c
       - maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-1GB}
       - -c
@@ -156,15 +169,17 @@ services:
   redis:
     image: 'redis:7'
     restart: unless-stopped
-    # NVMe optimized with I/O threading (configurable via env vars)
+    # Optimized for 8 vCPU / 32GB RAM - doubled resources for heavy worker polling
     command: >-
       redis-server
-      --maxmemory ${REDIS_MAXMEMORY:-6gb}
+      --maxmemory ${REDIS_MAXMEMORY:-12gb}
       --maxmemory-policy noeviction
       --appendonly yes
       --appendfsync everysec
       --tcp-keepalive 300
-      --io-threads ${REDIS_IO_THREADS:-4}
+      --tcp-backlog 511
+      --timeout 0
+      --io-threads ${REDIS_IO_THREADS:-6}
       --io-threads-do-reads yes
     volumes:
       - 'redis-data:/data'
@@ -189,10 +204,11 @@ services:
       DATABASE_URL: 'postgresql://postgres:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-trigger}?schema=public&sslmode=disable'
       ELECTRIC_SECRET: '${SERVICE_PASSWORD_64_ELECTRIC}'
       ELECTRIC_USAGE_REPORTING: 'false'
-      ELECTRIC_DB_POOL_SIZE: 150
-      # Cache settings to reduce DB pressure during high concurrency
-      ELECTRIC_CACHE_MAX_AGE: 10
-      ELECTRIC_CACHE_STALE_AGE: 120
+      # Scaled pool size for heavy worker polling (8 vCPU / 32GB RAM)
+      ELECTRIC_DB_POOL_SIZE: 600
+      # Extended cache settings to reduce shape churn and DB pressure
+      ELECTRIC_CACHE_MAX_AGE: 120
+      ELECTRIC_CACHE_STALE_AGE: 1200
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/v1/health"]
       interval: 10s
@@ -216,6 +232,73 @@ services:
       CLICKHOUSE_USER: ${CLICKHOUSE_ADMIN_USER:-default}
       CLICKHOUSE_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    # Inline config creation (Coolify compatible - no external files needed)
+    # Optimized for 8 vCPU / 32GB RAM
+    command:
+      - /bin/bash
+      - -c
+      - |
+        # Server settings (config.d) - NO profiles here
+        cat > /etc/clickhouse-server/config.d/custom.xml << 'EOF'
+        <clickhouse>
+            <!-- Replace default listen_host (removes ::) with IPv4 only -->
+            <listen_host replace="replace">0.0.0.0</listen_host>
+
+            <!-- Logging: reduce noise -->
+            <logger>
+                <level>warning</level>
+            </logger>
+
+            <!-- Memory settings - DOUBLED for 32GB RAM (heavy worker polling) -->
+            <mark_cache_size>10737418240</mark_cache_size> <!-- 10GB -->
+            <uncompressed_cache_size>17179869184</uncompressed_cache_size> <!-- 16GB -->
+            <max_server_memory_usage_to_ram_ratio>0.9</max_server_memory_usage_to_ram_ratio>
+
+            <!-- Concurrency settings - DOUBLED for 8 vCPU (heavy worker polling) -->
+            <max_concurrent_queries>300</max_concurrent_queries>
+            <concurrent_threads_soft_limit_num>8</concurrent_threads_soft_limit_num>
+            <background_pool_size>32</background_pool_size>
+            <background_schedule_pool_size>32</background_schedule_pool_size>
+
+            <merge_tree>
+                <max_bytes_to_merge_at_max_space_in_pool>161061273600</max_bytes_to_merge_at_max_space_in_pool>
+                <number_of_free_entries_in_pool_to_execute_mutation>20</number_of_free_entries_in_pool_to_execute_mutation>
+                <!-- Aggressive merging to reduce FINAL query work -->
+                <min_age_to_force_merge_seconds>3600</min_age_to_force_merge_seconds>
+                <min_age_to_force_merge_on_partition_only>1</min_age_to_force_merge_on_partition_only>
+            </merge_tree>
+
+            <!-- Reduce log flush frequency -->
+            <asynchronous_metric_log>
+                <flush_interval_milliseconds>60000</flush_interval_milliseconds>
+            </asynchronous_metric_log>
+            <metric_log>
+                <flush_interval_milliseconds>60000</flush_interval_milliseconds>
+            </metric_log>
+            <query_log>
+                <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+            </query_log>
+        </clickhouse>
+        EOF
+
+        # User/profile settings (users.d) - profiles MUST be here to take effect
+        cat > /etc/clickhouse-server/users.d/custom.xml << 'EOF'
+        <clickhouse>
+            <profiles>
+                <default>
+                    <max_threads>8</max_threads>
+                    <max_block_size>65536</max_block_size>
+                    <input_format_parallel_parsing>1</input_format_parallel_parsing>
+                    <output_format_parallel_formatting>1</output_format_parallel_formatting>
+                    <!-- FINAL query optimizations (7-30x faster for ReplacingMergeTree) -->
+                    <do_not_merge_across_partitions_select_final>1</do_not_merge_across_partitions_select_final>
+                    <max_final_threads>8</max_final_threads>
+                    <optimize_move_to_prewhere_if_final>1</optimize_move_to_prewhere_if_final>
+                </default>
+            </profiles>
+        </clickhouse>
+        EOF
+        exec /entrypoint.sh
     volumes:
       - 'clickhouse-data:/var/lib/clickhouse'
       - 'clickhouse-logs:/var/log/clickhouse-server'
