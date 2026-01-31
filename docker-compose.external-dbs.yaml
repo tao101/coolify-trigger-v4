@@ -1,6 +1,6 @@
 services:
   trigger:
-    image: 'ghcr.io/triggerdotdev/trigger.dev:v4.3.0'
+    image: 'ghcr.io/triggerdotdev/trigger.dev@sha256:b208b821aebeafe1e814618e92009e104bcb66d7b67d9aee580f5b12ce9391ca'
     restart: unless-stopped
     depends_on:
       clickhouse:
@@ -14,10 +14,29 @@ services:
     user: root
     command: "sh -c \"chown -R node:node /home/node/shared && exec ./scripts/entrypoint.sh\"\n"
     environment:
+      # Coolify magic variable - exposes trigger on port 3000 with auto-generated URL
+      SERVICE_FQDN_TRIGGER_3000: ''
+      # Database connection
+      DATABASE_CONNECTION_LIMIT: 350
+      # Concurrency limits
+      DEFAULT_ENV_EXECUTION_CONCURRENCY_LIMIT: 1000
+      DEFAULT_ORG_EXECUTION_CONCURRENCY_LIMIT: 3000
+      # Run engine
+      RUN_ENGINE_WORKER_COUNT: 20
+      RUN_ENGINE_TASKS_PER_WORKER: 50
+      WORKER_CONCURRENCY: 50
+      # Queue sizes
+      MAXIMUM_DEV_QUEUE_SIZE: 30000
+      MAXIMUM_DEPLOYED_QUEUE_SIZE: 150000
+      # Queue polling optimization (fast task acceptance for bulk submission)
+      MASTER_QUEUE_CONSUMERS_INTERVAL_MS: 100
+      MASTER_QUEUE_CONSUMER_DEQUEUE_COUNT: 50
+      PROCESS_WORKER_QUEUE_DEBOUNCE_MS: 50
       REMIX_APP_PORT: 3000
-      APP_ORIGIN: ${SERVICE_URL_TRIGGER}
-      LOGIN_ORIGIN: ${SERVICE_URL_TRIGGER}
-      API_ORIGIN: ${SERVICE_URL_TRIGGER}
+      # Using FQDN instead of SERVICE_URL (FQDN is just the domain, so we add https://)
+      APP_ORIGIN: 'https://${SERVICE_FQDN_TRIGGER}'
+      LOGIN_ORIGIN: 'https://${SERVICE_FQDN_TRIGGER}'
+      API_ORIGIN: 'https://${SERVICE_FQDN_TRIGGER}'
       SESSION_SECRET: '${SERVICE_PASSWORD_SESSION}'
       MAGIC_LINK_SECRET: '${SERVICE_PASSWORD_MAGIC}'
       ENCRYPTION_KEY: '${SERVICE_PASSWORD_ENCRYPTION}'
@@ -31,7 +50,7 @@ services:
       REDIS_PASSWORD: '${REDIS_PASSWORD:-}'
       REDIS_TLS_DISABLED: '${REDIS_TLS_DISABLED:-true}'
       ELECTRIC_ORIGIN: 'http://electric:3000'
-      DEV_OTEL_EXPORTER_OTLP_ENDPOINT: '${SERVICE_URL_TRIGGER}/otel'
+      DEV_OTEL_EXPORTER_OTLP_ENDPOINT: 'https://${SERVICE_FQDN_TRIGGER}/otel'
       DEPLOY_REGISTRY_HOST: '${SERVICE_FQDN_REGISTRY}'
       DEPLOY_REGISTRY_NAMESPACE: '${REGISTRY_NAMESPACE:-trigger}'
       DEPLOY_REGISTRY_USERNAME: ${REGISTRY_USERNAME:-trigger}
@@ -40,7 +59,7 @@ services:
       OBJECT_STORE_ACCESS_KEY_ID: admin
       OBJECT_STORE_SECRET_ACCESS_KEY: '${SERVICE_PASSWORD_MINIO}'
       GRACEFUL_SHUTDOWN_TIMEOUT: 1000
-      NODE_MAX_OLD_SPACE_SIZE: ${NODE_MAX_OLD_SPACE_SIZE:-1024}
+      NODE_MAX_OLD_SPACE_SIZE: ${NODE_MAX_OLD_SPACE_SIZE:-16384}
       TRIGGER_BOOTSTRAP_ENABLED: 1
       TRIGGER_BOOTSTRAP_WORKER_GROUP_NAME: bootstrap
       TRIGGER_BOOTSTRAP_WORKER_TOKEN_PATH: /home/node/shared/worker_token
@@ -71,13 +90,17 @@ services:
       start_period: 30s
 
   electric:
-    image: 'electricsql/electric:1.0.24'
+    image: 'electricsql/electric:1.2.9'
     restart: unless-stopped
     environment:
       # External PostgreSQL connection
       DATABASE_URL: '${DATABASE_URL}'
-      ELECTRIC_INSECURE: 'true'
+      ELECTRIC_SECRET: '${SERVICE_PASSWORD_64_ELECTRIC}'
       ELECTRIC_USAGE_REPORTING: 'false'
+      ELECTRIC_DB_POOL_SIZE: 150
+      # Cache settings to reduce DB pressure during high concurrency
+      ELECTRIC_CACHE_MAX_AGE: 10
+      ELECTRIC_CACHE_STALE_AGE: 120
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/v1/health"]
       interval: 10s
@@ -86,38 +109,22 @@ services:
       start_period: 10s
 
   clickhouse:
-    image: 'bitnamilegacy/clickhouse:latest'
+    image: 'clickhouse/clickhouse-server:25.8'
     restart: unless-stopped
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        mkdir -p /bitnami/clickhouse/etc/config.d
-        cat > /bitnami/clickhouse/etc/config.d/override.xml << 'XMLEOF'
-        <clickhouse>
-            <listen_host>0.0.0.0</listen_host>
-            <logger><level>warning</level></logger>
-            <mark_cache_size>524288000</mark_cache_size>
-            <concurrent_threads_soft_limit_num>1</concurrent_threads_soft_limit_num>
-            <profiles>
-                <default>
-                <max_block_size>8192</max_block_size>
-                <max_download_threads>1</max_download_threads>
-                <input_format_parallel_parsing>0</input_format_parallel_parsing>
-                <output_format_parallel_formatting>0</output_format_parallel_formatting>
-                </default>
-            </profiles>
-        </clickhouse>
-        XMLEOF
-        exec /opt/bitnami/scripts/clickhouse/entrypoint.sh /opt/bitnami/scripts/clickhouse/run.sh
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     environment:
-      CLICKHOUSE_ADMIN_USER: ${CLICKHOUSE_ADMIN_USER:-default}
-      CLICKHOUSE_ADMIN_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
+      CLICKHOUSE_USER: ${CLICKHOUSE_ADMIN_USER:-default}
+      CLICKHOUSE_PASSWORD: '${SERVICE_PASSWORD_64_CLICKHOUSE}'
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      - 'clickhouse-data:/bitnami/clickhouse'
+      - 'clickhouse-data:/var/lib/clickhouse'
+      - 'clickhouse-logs:/var/log/clickhouse-server'
     healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/8123'"]
-      interval: 5s
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1']
+      interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
@@ -134,6 +141,8 @@ services:
         htpasswd -Bbn "$${REGISTRY_USERNAME}" "$${REGISTRY_PASSWORD}" > /auth/htpasswd
         exec /entrypoint.sh /etc/docker/registry/config.yml
     environment:
+      # Coolify magic variable - exposes registry on port 5000 with auto-generated URL
+      SERVICE_FQDN_REGISTRY_5000: ''
       REGISTRY_USERNAME: ${REGISTRY_USERNAME:-trigger}
       REGISTRY_PASSWORD: '${SERVICE_PASSWORD_REGISTRY}'
       REGISTRY_AUTH: htpasswd
@@ -165,7 +174,7 @@ services:
       start_period: 10s
 
   supervisor:
-    image: 'ghcr.io/triggerdotdev/supervisor:v4.3.0'
+    image: 'ghcr.io/triggerdotdev/supervisor:prod-c859be9-1768837617'
     restart: unless-stopped
     depends_on:
       - docker-proxy
@@ -173,6 +182,19 @@ services:
     user: root
     command: "sh -c \"chown -R node:node /home/node/shared && exec /usr/bin/dumb-init -- pnpm run --filter supervisor start\"\n"
     environment:
+      # Dequeue settings - optimized for fast task pickup during bulk submission
+      TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: 10
+      TRIGGER_DEQUEUE_MAX_RUN_COUNT: 20
+      TRIGGER_DEQUEUE_INTERVAL_MS: 100
+      TRIGGER_DEQUEUE_IDLE_INTERVAL_MS: 500
+      TRIGGER_DEQUEUE_MIN_CONSUMER_COUNT: 2
+      TRIGGER_DEQUEUE_SCALING_STRATEGY: aggressive
+      TRIGGER_DEQUEUE_SCALING_UP_COOLDOWN_MS: 2000
+      # Disable machine preset limits for faster task startup
+      DOCKER_ENFORCE_MACHINE_PRESETS: false
+      ENFORCE_MACHINE_PRESETS: 0
+      # Runner settings (reduced polling for high concurrency)
+      RUNNER_SNAPSHOT_POLL_INTERVAL_SECONDS: 5
       TRIGGER_API_URL: http://trigger:3000
       OTEL_EXPORTER_OTLP_ENDPOINT: http://trigger:3000
       TRIGGER_WORKER_TOKEN: 'file:///home/node/shared/worker_token'
@@ -182,15 +204,10 @@ services:
       DOCKER_HOST: tcp://docker-proxy:2375
       DOCKER_RUNNER_NETWORKS: ${DOCKER_RUNNER_NETWORKS:-trigger-net}
       DOCKER_AUTOREMOVE_EXITED_CONTAINERS: 1
-      DOCKER_REGISTRY_URL: ${SERVICE_URL_REGISTRY}
+      DOCKER_REGISTRY_URL: 'https://${SERVICE_FQDN_REGISTRY}'
       DOCKER_REGISTRY_USERNAME: ${REGISTRY_USERNAME:-trigger}
       DOCKER_REGISTRY_PASSWORD: '${SERVICE_PASSWORD_REGISTRY}'
-      DEBUG: 1
-      DOCKER_ENFORCE_MACHINE_PRESETS: true
-      TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: 5
-      TRIGGER_DEQUEUE_MAX_RUN_COUNT: 5
-      ENFORCE_MACHINE_PRESETS: 1
-      TRIGGER_DEQUEUE_INTERVAL_MS: 1000
+      DEBUG: 0
     volumes:
       - 'shared-data:/home/node/shared'
     healthcheck:
@@ -221,6 +238,7 @@ services:
 
 volumes:
   clickhouse-data:
+  clickhouse-logs:
   minio-data:
   shared-data:
   registry-data:

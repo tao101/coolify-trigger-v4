@@ -5,7 +5,7 @@
 
 services:
   supervisor:
-    image: 'ghcr.io/triggerdotdev/supervisor:v4.3.0'
+    image: 'ghcr.io/triggerdotdev/supervisor:prod-c859be9-1768837617'
     restart: unless-stopped
     depends_on:
       - docker-proxy
@@ -15,7 +15,8 @@ services:
     environment:
       # Connect to remote webapp (REQUIRED - set in .env)
       TRIGGER_API_URL: ${TRIGGER_API_URL}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${TRIGGER_API_URL}
+      # OTEL endpoint for sending task run logs to the dashboard enable variable to be set in .env
+      OTEL_EXPORTER_OTLP_ENDPOINT: '${OTEL_EXPORTER_OTLP_ENDPOINT:-${TRIGGER_API_URL}/otel}'
 
       # Worker authentication (REQUIRED - get from webapp after first deploy)
       TRIGGER_WORKER_TOKEN: ${TRIGGER_WORKER_TOKEN}
@@ -29,7 +30,7 @@ services:
 
       # Docker settings
       DOCKER_HOST: tcp://docker-proxy:2375
-      DOCKER_RUNNER_NETWORKS: ${DOCKER_RUNNER_NETWORKS:-trigger-worker-net}
+      DOCKER_RUNNER_NETWORKS: ${DOCKER_RUNNER_NETWORKS:-${COOLIFY_RESOURCE_UUID:-trigger-worker-net}}
       DOCKER_AUTOREMOVE_EXITED_CONTAINERS: 1
       # Disable machine preset limits for faster task startup (removes CPU/memory constraints)
       DOCKER_ENFORCE_MACHINE_PRESETS: ${DOCKER_ENFORCE_MACHINE_PRESETS:-false}
@@ -39,25 +40,31 @@ services:
       DOCKER_REGISTRY_USERNAME: ${REGISTRY_USERNAME:-trigger}
       DOCKER_REGISTRY_PASSWORD: ${REGISTRY_PASSWORD}
 
-      # Scaling settings (adjust based on server capacity)
-      # Defaults match Trigger.dev recommendations for fast task startup
-      TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: ${DEQUEUE_CONSUMER_COUNT:-5}
-      TRIGGER_DEQUEUE_MAX_RUN_COUNT: ${DEQUEUE_RUN_COUNT:-10}
-      TRIGGER_DEQUEUE_INTERVAL_MS: ${DEQUEUE_INTERVAL_MS:-250}
-      # Dequeue scaling for dynamic consumer adjustment
-      TRIGGER_DEQUEUE_MIN_CONSUMER_COUNT: ${DEQUEUE_MIN_CONSUMER_COUNT:-2}
-      TRIGGER_DEQUEUE_IDLE_INTERVAL_MS: ${DEQUEUE_IDLE_INTERVAL_MS:-500}
-      TRIGGER_DEQUEUE_SCALING_STRATEGY: ${DEQUEUE_SCALING_STRATEGY:-aggressive}
-      TRIGGER_DEQUEUE_SCALING_UP_COOLDOWN_MS: ${DEQUEUE_SCALING_UP_COOLDOWN_MS:-2000}
+      # Scaling settings - configured for 200 concurrent tasks (10 consumers × 20 runs)
+      TRIGGER_DEQUEUE_MAX_CONSUMER_COUNT: ${DEQUEUE_CONSUMER_COUNT:-10}
+      TRIGGER_DEQUEUE_MAX_RUN_COUNT: ${DEQUEUE_RUN_COUNT:-20}
+      TRIGGER_DEQUEUE_INTERVAL_MS: ${DEQUEUE_INTERVAL_MS:-1500}
+      # Dequeue scaling - conservative to prevent webapp overload
+      TRIGGER_DEQUEUE_MIN_CONSUMER_COUNT: ${DEQUEUE_MIN_CONSUMER_COUNT:-1}
+      TRIGGER_DEQUEUE_IDLE_INTERVAL_MS: ${DEQUEUE_IDLE_INTERVAL_MS:-5000}
+      TRIGGER_DEQUEUE_SCALING_STRATEGY: ${DEQUEUE_SCALING_STRATEGY:-smooth}
+      TRIGGER_DEQUEUE_SCALING_UP_COOLDOWN_MS: ${DEQUEUE_SCALING_UP_COOLDOWN_MS:-10000}
+      TRIGGER_DEQUEUE_SCALING_DOWN_COOLDOWN_MS: ${DEQUEUE_SCALING_DOWN_COOLDOWN_MS:-5000}
 
-      # Runner settings for faster task execution
-      RUNNER_SNAPSHOT_POLL_INTERVAL_SECONDS: ${RUNNER_SNAPSHOT_POLL_INTERVAL_SECONDS:-1}
+      # Runner settings (reduced polling for high concurrency)
+      RUNNER_SNAPSHOT_POLL_INTERVAL_SECONDS: ${RUNNER_SNAPSHOT_POLL_INTERVAL_SECONDS:-10}
 
       # Machine presets enforcement (0 = disabled for faster startup)
       ENFORCE_MACHINE_PRESETS: ${ENFORCE_MACHINE_PRESETS:-0}
 
       # Debug mode
       DEBUG: ${DEBUG:-0}
+
+      # Logging options
+      # Send console.log output and detailed run logs to the Trigger.dev dashboard
+      SEND_RUN_DEBUG_LOGS: ${SEND_RUN_DEBUG_LOGS:-true}
+      # Pretty format logs in container output (useful for local debugging)
+      RUNNER_PRETTY_LOGS: ${RUNNER_PRETTY_LOGS:-true}
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:8020/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s
@@ -67,15 +74,6 @@ services:
     # Security hardening
     security_opt:
       - no-new-privileges:true
-    # Resource limits (configure in .env based on server tier)
-    deploy:
-      resources:
-        limits:
-          cpus: '${SUPERVISOR_CPUS:-3}'
-          memory: ${SUPERVISOR_MEMORY:-14G}
-        reservations:
-          cpus: '${SUPERVISOR_CPUS_RESERVED:-2}'
-          memory: ${SUPERVISOR_MEMORY_RESERVED:-8G}
     # Log rotation
     logging:
       driver: "json-file"
@@ -104,12 +102,6 @@ services:
     # Security hardening
     security_opt:
       - no-new-privileges:true
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '${DOCKER_PROXY_CPUS:-1}'
-          memory: ${DOCKER_PROXY_MEMORY:-1G}
     # Log rotation
     logging:
       driver: "json-file"
