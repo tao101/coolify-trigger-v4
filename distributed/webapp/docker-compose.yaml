@@ -82,11 +82,30 @@ services:
       RUN_REPLICATION_LOG_LEVEL: info
       APP_LOG_LEVEL: info
       TRIGGER_TELEMETRY_DISABLED: 0
-      # Email configuration (optional)
+      # Email configuration for login/magic links (optional)
       WHITELISTED_EMAILS: '${WHITELISTED_EMAILS:-}'
       EMAIL_TRANSPORT: '${EMAIL_TRANSPORT:-}'
       FROM_EMAIL: '${FROM_EMAIL:-}'
       RESEND_API_KEY: '${RESEND_API_KEY:-}'
+      # Alert email configuration (separate from login emails)
+      # Transport: resend, smtp, or aws-ses
+      ALERT_EMAIL_TRANSPORT: '${ALERT_EMAIL_TRANSPORT:-}'
+      ALERT_FROM_EMAIL: '${ALERT_FROM_EMAIL:-}'
+      ALERT_REPLY_TO_EMAIL: '${ALERT_REPLY_TO_EMAIL:-}'
+      # For Resend transport
+      ALERT_RESEND_API_KEY: '${ALERT_RESEND_API_KEY:-}'
+      # For SMTP transport (alternative to Resend)
+      ALERT_SMTP_HOST: '${ALERT_SMTP_HOST:-}'
+      ALERT_SMTP_PORT: '${ALERT_SMTP_PORT:-}'
+      ALERT_SMTP_SECURE: '${ALERT_SMTP_SECURE:-}'
+      ALERT_SMTP_USER: '${ALERT_SMTP_USER:-}'
+      ALERT_SMTP_PASSWORD: '${ALERT_SMTP_PASSWORD:-}'
+      # Slack integration (required for Slack alerts)
+      # Create app at https://api.slack.com/apps
+      ORG_SLACK_INTEGRATION_CLIENT_ID: '${ORG_SLACK_INTEGRATION_CLIENT_ID:-}'
+      ORG_SLACK_INTEGRATION_CLIENT_SECRET: '${ORG_SLACK_INTEGRATION_CLIENT_SECRET:-}'
+      # Admin auto-promotion (regex pattern - users matching become admins on signup)
+      ADMIN_EMAILS: '${ADMIN_EMAILS:-}'
     volumes:
       - 'shared-data:/home/node/shared'
     healthcheck:
